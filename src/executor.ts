@@ -40,6 +40,13 @@ export type ExecuteAction = BaseAction & {
     register?: Record<string, string>;
 };
 
+export type ExampleRequest = {
+    url: string
+    headers: any,
+    method: string,
+    body: any,
+}
+
 export type WorkflowAction =
     | RegisterAction
     | InputAction
@@ -189,12 +196,14 @@ export class ActionExecutor {
         this.console.log(
             `\nExported collection with responses to: exports/${filename}`,
             "INFO",
+    
         );
     }
+    
 
     private addExampleToItem(
         itemId: string,
-        action: ExecuteAction,
+        request: ExampleRequest,
         response: any,
         status: number,
         statusText: string,
@@ -219,19 +228,19 @@ export class ActionExecutor {
             item.response.push({
                 name: exampleName,
                 originalRequest: {
-                    method: item.request.method,
-                    header: item.request.header || [],
-                    body: action.body
+                    method: request.method,
+                    header: request.headers || [],
+                    body: request.body
                         ? {
-                              mode: "raw",
-                              raw: JSON.stringify(action.body, null, 2),
-                              options: {
-                                  raw: {
-                                      headerFamily: "json",
-                                      language: "json",
-                                  },
-                              },
-                          }
+                            mode: "raw",
+                            raw: JSON.stringify(JSON.parse(request.body), null, 2),
+                            options: {
+                                raw: {
+                                    headerFamily: "json",
+                                    language: "json",
+                                },
+                            },
+                        }
                         : item.request.body || {},
                     url: item.request.url || {},
                 },
@@ -256,7 +265,7 @@ export class ActionExecutor {
             }
         };
 
-        const actionPath = urlPath(action.url);
+        const actionPath = urlPath(request.url);
 
         const findAndAdd = (items: any[]): boolean => {
             for (const item of items) {
@@ -268,8 +277,8 @@ export class ActionExecutor {
                     const rawUrl: string =
                         item.request.url?.raw ||
                         (item.request.url?.host || []).join("") +
-                            "/" +
-                            (item.request.url?.path || []).join("/");
+                        "/" +
+                        (item.request.url?.path || []).join("/");
                     const itemPath = urlPath(
                         rawUrl.replace(/\{\{[^}]+\}\}/g, ""),
                     );
@@ -278,7 +287,7 @@ export class ActionExecutor {
                         "",
                     );
                     const urlMatch =
-                        item.request.method === action.method &&
+                        item.request.method === request.method &&
                         itemPath === actionPathClean;
 
                     if (idMatch || urlMatch) {
@@ -294,7 +303,7 @@ export class ActionExecutor {
         const matched = findAndAdd(this.collection.item);
         if (!matched) {
             this.file.log(
-                `addExampleToItem: no matching item found for item_id="${itemId}" url="${action.url}" method="${action.method}"`,
+                `addExampleToItem: no matching item found for item_id="${itemId}" url="${request.url}" method="${request.method}"`,
                 "ERROR",
             );
         }
@@ -349,7 +358,7 @@ export class ActionExecutor {
                     null,
                     2,
                 );
-            } catch {}
+            } catch { }
 
             md += `- **Body:**\n\`\`\`json\n${responseBody || "(empty body)"}\n\`\`\`\n`;
         } else if (errorMsg) {
@@ -534,9 +543,17 @@ export class ActionExecutor {
                     }
                 }
             }
+
+            const request = {
+                url,
+                method,
+                headers,
+                body: body ? JSON.stringify(body) : undefined,
+            }
+
             this.addExampleToItem(
                 action.item_id || "",
-                action,
+                request,
                 resData,
                 response.status,
                 response.statusText,

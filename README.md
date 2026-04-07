@@ -4,6 +4,8 @@
 
 A small CLI that turns a Postman Collection into a step-by-step JSON workflow (REGISTER / INPUT / LOG / EXECUTE), using Gemini to plan the flow and then execute it. It also saves generated workflows for reuse and writes detailed logs while it runs.
 
+Currently it is in Beta test version. Many more things there is to be fixed. And I will continue to work on this.
+
 **Flow (what / where / why / how)**
 
 - What: Convert a Postman Collection into an ordered JSON workflow of actions (REGISTER, INPUT, LOG, EXECUTE).
@@ -18,14 +20,21 @@ A small CLI that turns a Postman Collection into a step-by-step JSON workflow (R
 
 ```bash
 node index.ts <postman-collection>.json
+
+# With workflow
+node index.ts <postman-collection>.json --workflow workflows/workflow_2026-04-07_10-28-17.json
 ```
 
 **Outputs**
 
 - Generated workflows are saved under `workflows/`.
+    > AI generated workflow is saved so that it can be used later w/o calling AI for same request paths. Tokens saved!
 - Run logs are written under `logs/process_logs/`.
+    > No thing is missed, every action, every response, every request is logged here to debug later
 - Run errors are written under `logs/error_logs`.
+    > If a route faces error, detailed response with request is saved to check and debug later
 - Response saved postman collections exported under `exports/`.
+    > The requests and responses of the executions are saved in the postman collection to import in postman and use it!
 
 **Flags**
 
