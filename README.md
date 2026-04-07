@@ -2,6 +2,8 @@
 
 **Status:** Beta v1
 
+![Demo](./assets/demo.png)
+
 A small CLI that turns a Postman Collection into a step-by-step JSON workflow (REGISTER / INPUT / LOG / EXECUTE), using Gemini to plan the flow and then execute it. It also saves generated workflows for reuse and writes detailed logs while it runs.
 
 Currently it is in Beta test version. Many more things there is to be fixed. And I will continue to work on this.
