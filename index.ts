@@ -1,95 +1,23 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as readline from "readline";
 import {
     FileLogger,
     ConsoleLogger,
+    extractCollectionVariables,
     simplifyPostmanCollection,
 } from "./src/utils.ts";
-import { processPostmanAI } from "./src/brain.ts";
 import { ActionExecutor } from "./src/executor.ts";
-import type { WorkflowAction, ActionConfig } from "./src/executor.ts";
+import type { WorkflowAction } from "./src/executor.ts";
+import {
+    parseArgs,
+    showHelp,
+    promptForContext,
+    filterRequestsByCliPatterns,
+} from "./src/cli.ts";
 
-type CliArgs = ActionConfig & {
-    collection?: string;
-    context?: string;
-    contextRequested?: boolean;
-};
 
-const parseArgs = (): CliArgs => {
-    const args = process.argv.slice(2);
-    const config: CliArgs = {};
-
-    for (let i = 0; i < args.length; i++) {
-        const arg = args[i];
-
-        // Split on first '=' only — handles values that themselves contain '='
-        // e.g. --url=http://foo.com/bar=baz
-        const getVal = (
-            a: string,
-            next: string | undefined,
-        ): string | undefined => {
-            if (a.includes("=")) return a.split("=").slice(1).join("=");
-            if (next && !next.startsWith("-")) {
-                i++;
-                return next;
-            }
-            return undefined;
-        };
-
-        if (arg.startsWith("--delay")) {
-            config.delay = parseInt(getVal(arg, args[i + 1]) || "0");
-        } else if (arg.startsWith("--timeout")) {
-            config.timeout = parseInt(getVal(arg, args[i + 1]) || "30000");
-        } else if (arg.startsWith("--skip")) {
-            config.skip = getVal(arg, args[i + 1]);
-        } else if (arg.startsWith("--only")) {
-            config.only = getVal(arg, args[i + 1]);
-        } else if (arg.startsWith("--workflow") || arg.startsWith("-wf")) {
-            config.workflowPath = getVal(arg, args[i + 1]);
-        } else if (arg.startsWith("--context") || arg.startsWith("-c")) {
-            config.contextRequested = true;
-            config.context = getVal(arg, args[i + 1]);
-        } else if (arg === "--dry") {
-            config.dry = true;
-        } else if (!arg.startsWith("-")) {
-            config.collection = arg;
-        }
-    }
-
-    return config;
-};
-
-const showHelp = () => {
-    console.log(`
-Usage: node index.ts <collection.json> [flags]
-
-Flags:
-  --delay=<ms>         Delay between requests (default: 0)
-  --timeout=<ms>       Request timeout in ms (default: 30000)
-  --skip=<pattern>     Skip requests whose URL contains pattern
-  --only=<pattern>     Only run requests whose URL contains pattern
-  --workflow=<path>    Use a pre-generated workflow JSON  (alias: -wf=)
-  --context=<text>     Extra instructions or context appended to the AI prompt (alias: -c=)
-  --dry                Dry run — plan workflow but do not send requests
-`);
-};
-
-const promptForContext = (): Promise<string> => {
-    const rl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout,
-    });
-    return new Promise((resolve) => {
-        rl.question(
-            "\n[CONTEXT] Enter additional instructions for the AI (or press Enter to skip):\n> ",
-            (answer) => {
-                rl.close();
-                resolve(answer.trim());
-            },
-        );
-    });
-};
+export const consoleLogger = new ConsoleLogger();
+export const fileLogger = new FileLogger();
 
 const main = async () => {
     const args = parseArgs();
@@ -99,8 +27,7 @@ const main = async () => {
         process.exit(1);
     }
 
-    const consoleLogger = new ConsoleLogger();
-    const fileLogger = new FileLogger();
+
     fileLogger.clear();
 
     const banner = (msg: string) => {
@@ -134,25 +61,17 @@ const main = async () => {
         const collectionJson = fs.readFileSync(collectionPath, "utf-8");
         const collection = JSON.parse(collectionJson);
 
-        // 2. Simplify Collection
-        consoleLogger.log("\nAnalyzing collection structure...", "INFO");
-        fileLogger.log("Analyzing collection structure...", "INFO");
-
-        const { requests, variables } = simplifyPostmanCollection(collection);
-        consoleLogger.log(
-            `Found ${requests.length} potential API routes`,
-            "INFO",
-        );
-
-        fileLogger.log(
-            `Simplified requests: ${JSON.stringify(requests, null, 2)}`,
-            "DEBUG",
-        );
+        const variables = extractCollectionVariables(collection);
 
         // 3. Obtain Workflow
-        let workflow: WorkflowAction[];
+        let workflow: WorkflowAction[] = [];
+        let runtimeWorkflowPath: string | undefined;
 
         if (args.workflowPath) {
+            // Annotate collection request items with synthetic _id values so
+            // exported response examples can map back to items reliably.
+            simplifyPostmanCollection(collection);
+
             consoleLogger.log(
                 `Using pre-generated workflow: ${args.workflowPath}`,
                 "INFO",
@@ -168,6 +87,36 @@ const main = async () => {
             }
             workflow = JSON.parse(fs.readFileSync(args.workflowPath, "utf-8"));
         } else {
+            // 2. Simplify Collection
+            consoleLogger.log("\nAnalyzing collection structure...", "INFO");
+            fileLogger.log("Analyzing collection structure...", "INFO");
+
+            const { requests } = simplifyPostmanCollection(collection);
+            const effectiveRequests = filterRequestsByCliPatterns(
+                requests,
+                args,
+            );
+
+            consoleLogger.log(
+                `Found ${requests.length} potential API routes`,
+                "INFO",
+            );
+            if (effectiveRequests.length !== requests.length) {
+                consoleLogger.log(
+                    `Route filters active: ${effectiveRequests.length}/${requests.length} routes eligible for workflow generation`,
+                    "INFO",
+                );
+                fileLogger.log(
+                    `Route filters active: ${effectiveRequests.length}/${requests.length} routes eligible for workflow generation`,
+                    "INFO",
+                );
+            }
+
+            fileLogger.log(
+                `Simplified requests: ${JSON.stringify(requests, null, 2)}`,
+                "DEBUG",
+            );
+
             // Resolve context: CLI flag takes priority, otherwise prompt interactively
             let context = args.context;
             if (args.contextRequested && context === undefined) {
@@ -187,8 +136,41 @@ const main = async () => {
                 "AI",
             );
 
+            const { generateWorkflowWithCoverage } = await import("./src/brain.ts");
+
             try {
-                workflow = await processPostmanAI(requests, variables, context);
+                workflow = await generateWorkflowWithCoverage(
+                    effectiveRequests,
+                    variables,
+                    context,
+                    {
+                        maxAttempts: 3,
+                        onAttemptFailure: (attempt, report) => {
+                            const summary =
+                                `AI workflow attempt ${attempt} incomplete: missing=${report.missing.length}, ` +
+                                `unknown_item_id=${report.extraItemIds.length}, ` +
+                                `no_item_id=${report.executeWithoutItemId}`;
+                            consoleLogger.log(summary, "ERROR");
+                            fileLogger.log(summary, "ERROR");
+                        },
+                        onRepairSuccess: (attempt) => {
+                            consoleLogger.log(
+                                `Workflow repaired successfully on attempt ${attempt}.`,
+                                "AI",
+                            );
+                            fileLogger.log(
+                                `Workflow repaired successfully on attempt ${attempt}.`,
+                                "AI",
+                            );
+                        },
+                        onModelLog: (message, level) => {
+                            fileLogger.log(
+                                message,
+                                level === "ERROR" ? "ERROR" : "AI",
+                            );
+                        },
+                    },
+                );
 
                 // Save workflow for future use
                 const workflowDir = path.join(process.cwd(), "workflows");
@@ -207,6 +189,7 @@ const main = async () => {
                     JSON.stringify(workflow, null, 2),
                     "utf-8",
                 );
+                runtimeWorkflowPath = savePath;
 
                 consoleLogger.log(
                     `Workflow saved to: ${path.relative(process.cwd(), savePath)}`,
@@ -240,7 +223,11 @@ const main = async () => {
         const executor = new ActionExecutor(
             consoleLogger,
             fileLogger,
-            args,
+            {
+                ...args,
+                exportBaseName: path.parse(collectionPath).name,
+                runtimeWorkflowPath,
+            },
             collection,
         );
         executor.registerInitialVariables(variables);

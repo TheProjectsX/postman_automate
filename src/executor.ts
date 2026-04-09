@@ -5,6 +5,8 @@ import {
     FileLogger,
     ConsoleLogger,
     getDeepValue,
+    extractRoutePath,
+    matchesAnyRoutePattern,
     resolveVariables,
     resolveObject,
     C,
@@ -42,7 +44,7 @@ export type ExecuteAction = BaseAction & {
 
 export type ExampleRequest = {
     url: string
-    headers: any,
+    headers: Record<string, string>,
     method: string,
     body: any,
 }
@@ -56,10 +58,12 @@ export type WorkflowAction =
 export type ActionConfig = {
     delay?: number;
     timeout?: number;
-    skip?: string;
-    only?: string;
+    skip?: string[];
+    only?: string[];
     dry?: boolean;
     workflowPath?: string;
+    exportBaseName?: string;
+    runtimeWorkflowPath?: string;
 };
 
 export class ActionExecutor {
@@ -69,6 +73,7 @@ export class ActionExecutor {
     private config: ActionConfig;
     private stats = { total: 0, success: 0, failed: 0, skipped: 0, errors: 0 };
     private failedLogsDir: string;
+    private workflowUpdated = false;
 
     private collection: any;
 
@@ -129,9 +134,27 @@ export class ActionExecutor {
         this.file.log("--- Completed Workflow Execution ---", "INFO");
         this.showSummary();
 
+        this.persistWorkflowUpdates(actions);
+
         if (this.collection) {
             await this.finalizeExport();
         }
+    }
+
+    private persistWorkflowUpdates(actions: WorkflowAction[]) {
+        const workflowPath = this.config.runtimeWorkflowPath;
+        if (!workflowPath || !this.workflowUpdated) return;
+
+        fs.writeFileSync(workflowPath, JSON.stringify(actions, null, 2), "utf-8");
+        const relativePath = path.relative(process.cwd(), workflowPath);
+        this.console.log(
+            `Updated workflow register paths saved to: ${relativePath}`,
+            "INFO",
+        );
+        this.file.log(
+            `Updated workflow register paths saved to: ${relativePath}`,
+            "INFO",
+        );
     }
 
     private showSummary() {
@@ -177,7 +200,11 @@ export class ActionExecutor {
             now.toISOString().split("T")[0] +
             "_" +
             now.toTimeString().split(" ")[0].replace(/:/g, "-");
-        const filename = `collection_export_${ts}.json`;
+        const safeBaseName = (this.config.exportBaseName || "collection")
+            .replace(/[^a-zA-Z0-9_-]/g, "_")
+            .replace(/_+/g, "_")
+            .replace(/^_+|_+$/g, "") || "collection";
+        const filename = `${safeBaseName}_tested_${ts}.json`;
         const filePath = path.join(exportDir, filename);
 
         // Deep-clone and strip the synthetic _id fields we added during
@@ -217,6 +244,10 @@ export class ActionExecutor {
 
             const exampleName = success ? "Success" : "Failed";
 
+            const requestHeaders = Object.entries(request.headers || {}).map(
+                ([key, value]) => ({ key, value: String(value) }),
+            );
+
             // Format response headers for Postman
             const postmanHeaders: any[] = [];
             resHeaders.forEach((value, key) => {
@@ -229,7 +260,7 @@ export class ActionExecutor {
                 name: exampleName,
                 originalRequest: {
                     method: request.method,
-                    header: request.headers || [],
+                    header: requestHeaders,
                     body: request.body
                         ? {
                             mode: "raw",
@@ -329,11 +360,34 @@ export class ActionExecutor {
             fs.mkdirSync(this.failedLogsDir, { recursive: true });
         }
 
-        const safeName = url.replace(/[^a-zA-Z0-9_-]/g, "_").substring(0, 50);
-        const filePath = path.join(
-            this.failedLogsDir,
-            `${method}_${safeName}_${Date.now()}.md`,
-        );
+        const buildFailureStem = (requestUrl: string, requestMethod: string) => {
+            const routePath = extractRoutePath(requestUrl);
+            const segments = routePath
+                .split("/")
+                .map((segment) => segment.trim())
+                .filter(Boolean)
+                .map((segment) => {
+                    if (segment.startsWith(":")) {
+                        const paramName = segment.slice(1).trim() || "param";
+                        return `[${paramName.replace(/[^a-zA-Z0-9_-]/g, "_")}]`;
+                    }
+
+                    return segment.replace(/[^a-zA-Z0-9_-]/g, "_");
+                });
+
+            const stem = segments.length ? segments.join("_") : "root";
+            return `${stem}_[${requestMethod.toUpperCase()}]`;
+        };
+
+        const baseName = buildFailureStem(url, method);
+        let filePath = path.join(this.failedLogsDir, `${baseName}.md`);
+        let suffix = 2;
+        while (fs.existsSync(filePath)) {
+            filePath = path.join(
+                this.failedLogsDir,
+                `${baseName}_${suffix++}.md`,
+            );
+        }
 
         let md = `# Failed API Request: ${method} ${url}\n\n`;
         md += `**Timestamp:** ${new Date().toISOString()}\n\n`;
@@ -406,18 +460,195 @@ export class ActionExecutor {
         );
     }
 
+    private resolveLogValue(action: LogAction) {
+        return resolveVariables(action.value, this.registers);
+    }
+
+    private resolveExecuteAction(action: ExecuteAction) {
+        return {
+            ...action,
+            url: resolveVariables(action.url, this.registers),
+            headers: resolveObject(action.headers || {}, this.registers),
+            body: resolveObject(action.body, this.registers),
+        };
+    }
+
+    private getHeaderValue(headers: Record<string, string>, name: string) {
+        const target = name.toLowerCase();
+        for (const [key, value] of Object.entries(headers)) {
+            if (key.toLowerCase() === target) return value;
+        }
+        return undefined;
+    }
+
+    private deleteHeader(headers: Record<string, string>, name: string) {
+        const target = name.toLowerCase();
+        for (const key of Object.keys(headers)) {
+            if (key.toLowerCase() === target) {
+                delete headers[key];
+            }
+        }
+    }
+
+    private prepareRequestPayload(
+        headers: Record<string, string>,
+        body: any,
+    ): { headers: Record<string, string>; body?: BodyInit } {
+        const preparedHeaders = { ...headers };
+
+        if (body === undefined || body === null) {
+            return { headers: preparedHeaders, body: undefined };
+        }
+
+        if (typeof body === "string") {
+            return { headers: preparedHeaders, body };
+        }
+
+        const contentType =
+            this.getHeaderValue(preparedHeaders, "Content-Type")?.toLowerCase() ||
+            "";
+
+        if (contentType.includes("multipart/form-data")) {
+            const form = new FormData();
+            if (typeof body === "object") {
+                for (const [key, value] of Object.entries(body)) {
+                    if (value === undefined || value === null) continue;
+                    if (Array.isArray(value)) {
+                        for (const item of value) {
+                            if (item === undefined || item === null) continue;
+                            form.append(key, String(item));
+                        }
+                    } else if (typeof value === "object") {
+                        form.append(key, JSON.stringify(value));
+                    } else {
+                        form.append(key, String(value));
+                    }
+                }
+            }
+
+            // Let fetch set the correct multipart boundary automatically.
+            this.deleteHeader(preparedHeaders, "Content-Type");
+            return { headers: preparedHeaders, body: form };
+        }
+
+        if (contentType.includes("application/x-www-form-urlencoded")) {
+            const params = new URLSearchParams();
+            if (typeof body === "object") {
+                for (const [key, value] of Object.entries(body)) {
+                    if (value === undefined || value === null) continue;
+                    params.append(key, String(value));
+                }
+            }
+            return { headers: preparedHeaders, body: params.toString() };
+        }
+
+        if (typeof body === "object") {
+            return { headers: preparedHeaders, body: JSON.stringify(body) };
+        }
+
+        return { headers: preparedHeaders, body: String(body) };
+    }
+
+    private getMissingUrlVariables(url: string) {
+        const matches = [...url.matchAll(/\{\{([\w.-]+)\}\}/g)];
+        return matches
+            .map((match) => match[1])
+            .filter((key) => !Object.prototype.hasOwnProperty.call(this.registers, key));
+    }
+
+    private async promptForRegisterPathOverride(
+        action: ExecuteAction,
+        responseData: any,
+        registerKey: string,
+        originalPath: string,
+    ) {
+        while (true) {
+            const rl = readline.createInterface({
+                input: process.stdin,
+                output: process.stdout,
+            });
+
+            const inputPath = await new Promise<string>((resolve) => {
+                rl.question(
+                    `\n[INPUT] Enter alternate response path for ${registerKey} (failed: ${originalPath}) or press Enter to skip: `,
+                    (answer) => {
+                        rl.close();
+                        resolve(answer.trim());
+                    },
+                );
+            });
+
+            if (!inputPath) {
+                this.console.log(
+                    `Skipped registering ${registerKey} because input was empty.`,
+                    "INPUT",
+                );
+                this.file.log(
+                    `Skipped registering ${registerKey} because input was empty.`,
+                    "INPUT",
+                );
+                return;
+            }
+
+            const overrideValue = getDeepValue(responseData, inputPath);
+            if (overrideValue === undefined) {
+                this.console.log(
+                    `Field not found in response for override path: ${inputPath}`,
+                    "ERROR",
+                );
+                this.file.log(
+                    `Field not found in response for override path: ${inputPath}`,
+                    "ERROR",
+                );
+                continue;
+            }
+
+            this.registers[registerKey] = overrideValue;
+            if (action.register) {
+                action.register[registerKey] = inputPath;
+                this.workflowUpdated = true;
+            }
+            this.console.log(
+                `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+                "INPUT",
+            );
+            this.file.log(
+                `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+                "INPUT",
+            );
+            this.file.log(
+                `Updated workflow register path for ${registerKey}: ${originalPath} -> ${inputPath}`,
+                "INFO",
+            );
+            return;
+        }
+    }
+
     private async handleInput(action: InputAction) {
+        const resolvedLabel = resolveVariables(action.label, this.registers);
         const rl = readline.createInterface({
             input: process.stdin,
             output: process.stdout,
         });
 
         const input = await new Promise<string>((resolve) => {
-            rl.question(`\n[INPUT] ${action.label}: `, (answer) => {
+            rl.question(`\n[INPUT] ${resolvedLabel}: `, (answer) => {
                 rl.close();
-                resolve(answer);
+                resolve(answer.trim());
             });
         });
+
+        if (!input) {
+            this.console.log(
+                `Skipped registering ${action.register} because input was empty.`,
+                "INPUT",
+            );
+            this.file.log(
+                `Skipped registering ${action.register} because input was empty.`,
+                "INPUT",
+            );
+            return;
+        }
 
         this.registers[action.register] = input;
         this.console.log(
@@ -428,18 +659,36 @@ export class ActionExecutor {
     }
 
     private handleLog(action: LogAction) {
-        const resolvedValue = resolveVariables(action.value, this.registers);
+        const resolvedValue = this.resolveLogValue(action);
         this.console.log(`\n${resolvedValue}`, "INFO");
         this.file.log(resolvedValue, "INFO");
     }
 
     private async handleExecute(action: ExecuteAction): Promise<boolean> {
-        const url = resolveVariables(action.url, this.registers);
-        const method = action.method;
+        const missingUrlVariables = this.getMissingUrlVariables(action.url);
+        if (missingUrlVariables.length > 0) {
+            const missingList = missingUrlVariables.join(", ");
+            this.console.log(
+                `Skipping EXECUTE because URL variables are missing: ${missingList}`,
+                "ERROR",
+            );
+            this.file.log(
+                `Skipping EXECUTE because URL variables are missing: ${missingList}`,
+                "ERROR",
+            );
+            this.stats.skipped++;
+            return true;
+        }
+
+        const resolvedAction = this.resolveExecuteAction(action);
+        const { url, method, headers, body } = resolvedAction;
+
+        const skipPatterns = this.config.skip || [];
+        const onlyPatterns = this.config.only || [];
 
         if (
-            this.config.skip &&
-            url.toLowerCase().includes(this.config.skip.toLowerCase())
+            skipPatterns.length > 0 &&
+            matchesAnyRoutePattern(url, skipPatterns)
         ) {
             this.console.log(`Skipping (skip-pattern): ${url}`, "INFO");
             this.file.log(`Skipping (skip-pattern): ${url}`, "INFO");
@@ -447,16 +696,13 @@ export class ActionExecutor {
             return true;
         }
         if (
-            this.config.only &&
-            !url.toLowerCase().includes(this.config.only.toLowerCase())
+            onlyPatterns.length > 0 &&
+            !matchesAnyRoutePattern(url, onlyPatterns)
         ) {
             this.file.log(`Hidden by only-pattern: ${url}`, "INFO");
             this.stats.skipped++;
             return true;
         }
-
-        const headers = resolveObject(action.headers || {}, this.registers);
-        const body = resolveObject(action.body, this.registers);
 
         this.console.log(`Executing [${method}] -> ${url}`, "INFO");
         this.file.log(`Executing [${method}] -> ${url}`, "INFO");
@@ -465,6 +711,8 @@ export class ActionExecutor {
         if (body) {
             this.file.log(`Body: ${JSON.stringify(body, null, 2)}`, "INFO");
         }
+
+        const prepared = this.prepareRequestPayload(headers, body);
 
         if (this.config.dry) {
             this.console.log("Dry run: request not sent", "INFO");
@@ -488,8 +736,8 @@ export class ActionExecutor {
 
             const response = await fetch(url, {
                 method,
-                headers,
-                body: body ? JSON.stringify(body) : undefined,
+                headers: prepared.headers,
+                body: prepared.body,
                 signal: controller.signal,
             });
             clearTimeout(timeoutId);
@@ -504,7 +752,7 @@ export class ActionExecutor {
                 this.stats.success++;
             } else {
                 this.stats.failed++;
-                this.logFailure(url, method, headers, body, {
+                this.logFailure(url, method, prepared.headers, body, {
                     status: response.status,
                     statusText: response.statusText,
                     headers: Object.fromEntries(response.headers.entries()),
@@ -540,6 +788,13 @@ export class ActionExecutor {
                             `Field not found in response: ${path}`,
                             "ERROR",
                         );
+
+                        await this.promptForRegisterPathOverride(
+                            action,
+                            resData,
+                            key,
+                            path,
+                        );
                     }
                 }
             }
@@ -547,7 +802,9 @@ export class ActionExecutor {
             const request = {
                 url,
                 method,
-                headers,
+                // Save original workflow headers (before variable resolution)
+                // so exported examples preserve placeholders like {{token}}.
+                headers: action.headers || {},
                 body: body ? JSON.stringify(body) : undefined,
             }
 
@@ -569,7 +826,7 @@ export class ActionExecutor {
             this.console.log(`Execution Failed: ${msg}${cause}`, "ERROR");
             this.file.log(`Execution Failed: ${msg}${cause}`, "ERROR");
             this.stats.errors++;
-            this.logFailure(url, method, headers, body, null, msg + cause);
+            this.logFailure(url, method, prepared.headers, body, null, msg + cause);
             return false;
         }
     }
