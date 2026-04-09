@@ -4,3 +4,5 @@ logs
 workflows
 postman-collection.json
 .env
+postman_docs
+.gitignore
