@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Postman Automator GUI</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <div class="dashboard">
+      <div class="main-column stack-in">
+        <header class="hero panel">
+          <div>
+            <p class="kicker">Postman Automation Studio</p>
+            <h1>Execution Console</h1>
+          </div>
+          <p class="subtitle">A pro control surface for running workflows with the same shared core used by CLI.</p>
+        </header>
+
+        <section class="panel form-panel stack-in">
+          <div class="section-head">
+            <h2>Run Setup</h2>
+            <p>Select collection and optional workflow file, then run.</p>
+          </div>
+
+          <form id="runForm" class="grid">
+            <label>
+              Collection File (required)
+              <input id="collectionFile" name="collectionFile" type="file" accept=".json,application/json" required />
+            </label>
+
+            <label>
+              Workflow File (optional)
+              <input id="workflowFile" name="workflowFile" type="file" accept=".json,application/json" />
+            </label>
+
+            <details class="wide settings-box" id="additionalSettings">
+              <summary>Additional Settings</summary>
+              <div class="settings-grid">
+                <label>
+                  Delay (ms)
+                  <input id="delay" name="delay" type="number" min="0" placeholder="0" />
+                </label>
+
+                <label>
+                  Timeout (ms)
+                  <input id="timeout" name="timeout" type="number" min="1" placeholder="30000" />
+                </label>
+
+                <label>
+                  Skip Patterns
+                  <input id="skip" name="skip" type="text" placeholder="/admin,/internal" />
+                </label>
+
+                <label>
+                  Only Patterns
+                  <input id="only" name="only" type="text" placeholder="/auth,/profile" />
+                </label>
+
+                <label class="wide">
+                  Context / Extra AI Instructions
+                  <textarea id="context" name="context" rows="4" placeholder="Optional context for workflow generation"></textarea>
+                </label>
+
+                <label class="toggle">
+                  <input id="dry" name="dry" type="checkbox" />
+                  <span>Dry Run</span>
+                </label>
+              </div>
+            </details>
+
+            <div class="actions wide">
+              <button id="startBtn" type="submit">Start Run</button>
+              <button id="stopBtn" type="button" class="danger">Stop</button>
+              <button id="resetBtn" type="button" class="secondary">Reset</button>
+            </div>
+          </form>
+        </section>
+
+        <section class="panel status-panel stack-in">
+          <div class="status-line">
+            <h2>Run Status</h2>
+            <span id="statusBadge" class="badge idle">idle</span>
+          </div>
+          <p id="cwdText" class="meta"></p>
+          <div id="resultBox" class="result-box"></div>
+        </section>
+      </div>
+
+      <aside class="side-column stack-in">
+        <section class="panel route-panel stack-in">
+          <div class="status-line">
+            <h2>Route Timeline</h2>
+            <span id="routeCount" class="meta">0 routes</span>
+          </div>
+          <div id="routeTimeline" class="route-timeline"></div>
+        </section>
+
+        <section class="panel logs-panel stack-in">
+          <div class="status-line">
+            <div class="logs-controls">
+              <h2>Live Logs</h2>
+              <span id="logCount" class="meta">0 lines</span>
+            </div>
+            <button type="button" id="logsToggleBtn" class="secondary small-btn">Collapse</button>
+          </div>
+          <div id="logsContent" class="logs-content open">
+            <pre id="logs" class="logs"></pre>
+          </div>
+        </section>
+      </aside>
+    </div>
+  </main>
+
+  <dialog id="promptDialog" class="prompt-dialog">
+    <form method="dialog" id="promptForm">
+      <div class="prompt-header">
+        <h3>Input Required</h3>
+        <button type="button" id="promptToggleBtn" class="prompt-toggle">Minimize</button>
+      </div>
+      <div class="prompt-body">
+        <p id="promptQuestion"></p>
+        <input id="promptValue" type="text" placeholder="Type value and submit" />
+        <menu>
+          <button type="button" id="promptNoInputBtn" class="secondary">No Input</button>
+          <button type="submit">Submit</button>
+        </menu>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

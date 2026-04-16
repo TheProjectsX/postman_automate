@@ -6,7 +6,9 @@
     "scripts": {
         "build": "tsc",
         "start": "node dist/index.js",
-        "dev": "ts-node index.ts"
+        "dev": "ts-node index.ts",
+        "dev:cli": "ts-node index.ts",
+        "dev:gui": "ts-node src/web/server.ts"
     },
     "keywords": [],
     "author": "",

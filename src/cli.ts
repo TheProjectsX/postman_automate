@@ -100,18 +100,22 @@ Examples:
 };
 
 export const promptForContext = (): Promise<string> => {
+    return promptText(
+        "\n[CONTEXT] Enter additional instructions for the AI (or press Enter to skip):\n> ",
+    );
+};
+
+export const promptText = (question: string): Promise<string> => {
     const rl = readline.createInterface({
         input: process.stdin,
         output: process.stdout,
     });
+
     return new Promise((resolve) => {
-        rl.question(
-            "\n[CONTEXT] Enter additional instructions for the AI (or press Enter to skip):\n> ",
-            (answer) => {
-                rl.close();
-                resolve(answer.trim());
-            },
-        );
+        rl.question(question, (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
     });
 };
 

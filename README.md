@@ -8,6 +8,19 @@ A small CLI that turns a Postman Collection into a step-by-step JSON workflow (R
 
 Currently it is in Beta test version. Many more things there is to be fixed. And I will continue to work on this.
 
+## Architecture
+
+The project now follows a core-first structure:
+
+- Core runner: `src/core/run-automation.ts`
+    - Owns collection loading, workflow load/generation, validation, execution, and outputs.
+- CLI mediator: `index.ts`
+    - Parses args, gets optional context input, and calls core.
+- Execution engine: `src/executor.ts`
+    - Reusable execution pipeline with injectable prompt provider and logger interfaces.
+
+This makes it straightforward to add a GUI mediator later (web or desktop) without duplicating run logic.
+
 **Flow (what / where / why / how)**
 
 - What: Convert a Postman Collection into an ordered JSON workflow of actions (REGISTER, INPUT, LOG, EXECUTE).
@@ -26,6 +39,30 @@ node index.ts <postman-collection>.json
 # With workflow
 node index.ts <postman-collection>.json --workflow workflows/workflow_2026-04-07_10-28-17.json
 ```
+
+## Interfaces
+
+You now have two interfaces over the same core engine:
+
+- CLI (existing):
+
+```bash
+npm run dev:cli -- postman-collection.json
+```
+
+- GUI (localhost web app):
+
+```bash
+npm run dev:gui
+```
+
+Then open `http://localhost:4173`.
+
+The GUI can:
+- Start a run with collection/workflow/options
+- Show live logs and run status
+- Handle runtime INPUT prompts from workflow execution
+- Show final stats and output paths
 
 **Outputs**
 

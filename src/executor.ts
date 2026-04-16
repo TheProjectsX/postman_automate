@@ -2,8 +2,6 @@ import * as readline from "readline";
 import * as fs from "fs";
 import * as path from "path";
 import {
-    FileLogger,
-    ConsoleLogger,
     getDeepValue,
     extractRoutePath,
     matchesAnyRoutePattern,
@@ -64,24 +62,52 @@ export type ActionConfig = {
     workflowPath?: string;
     exportBaseName?: string;
     runtimeWorkflowPath?: string;
+    stopSignal?: AbortSignal;
+};
+
+export type PromptProvider = {
+    prompt(question: string): Promise<string>;
+};
+
+export type ExecutionLogger = {
+    log(message: string, type?: string, colorOverride?: string): void;
+};
+
+export type ExecutionOutcome = {
+    stats: {
+        total: number;
+        success: number;
+        failed: number;
+        skipped: number;
+        errors: number;
+    };
+    failedLogsDir: string;
+    exportedCollectionPath?: string;
+    updatedWorkflowPath?: string;
 };
 
 export class ActionExecutor {
     private registers: Record<string, any> = {};
-    private console: ConsoleLogger;
-    private file: FileLogger;
+    private console: ExecutionLogger;
+    private file: ExecutionLogger;
     private config: ActionConfig;
     private stats = { total: 0, success: 0, failed: 0, skipped: 0, errors: 0 };
     private failedLogsDir: string;
     private workflowUpdated = false;
+    private promptProvider?: PromptProvider;
 
     private collection: any;
 
+    private isStopRequested() {
+        return Boolean(this.config.stopSignal?.aborted);
+    }
+
     constructor(
-        console: ConsoleLogger,
-        file: FileLogger,
+        console: ExecutionLogger,
+        file: ExecutionLogger,
         config: ActionConfig = {},
         collection?: any,
+        promptProvider?: PromptProvider,
     ) {
         this.console = console;
         this.file = file;
@@ -90,7 +116,25 @@ export class ActionExecutor {
             timeout: 30000,
             ...config,
         };
+
+        if (
+            this.config.delay === undefined ||
+            Number.isNaN(this.config.delay) ||
+            this.config.delay < 0
+        ) {
+            this.config.delay = 0;
+        }
+
+        if (
+            this.config.timeout === undefined ||
+            Number.isNaN(this.config.timeout) ||
+            this.config.timeout <= 0
+        ) {
+            this.config.timeout = 30000;
+        }
+
         this.collection = collection;
+        this.promptProvider = promptProvider;
 
         const now = new Date();
         const timestamp =
@@ -105,14 +149,27 @@ export class ActionExecutor {
         );
     }
 
-    async execute(actions: WorkflowAction[]) {
+    async execute(actions: WorkflowAction[]): Promise<ExecutionOutcome> {
         this.console.log("\n--- Starting Workflow Execution ---", "INFO");
         this.file.log("--- Starting Workflow Execution ---", "INFO");
         this.stats.total = actions.filter((a) => a.action === "EXECUTE").length;
         let consecutiveErrors = 0;
         const CONSECUTIVE_ERROR_LIMIT = 5;
         for (const action of actions) {
+            if (this.isStopRequested()) {
+                this.console.log("Execution stopped by user request.", "ERROR");
+                this.file.log("Execution stopped by user request.", "ERROR");
+                break;
+            }
+
             const success = await this.runAction(action);
+
+            if (this.isStopRequested()) {
+                this.console.log("Execution stopped by user request.", "ERROR");
+                this.file.log("Execution stopped by user request.", "ERROR");
+                break;
+            }
+
             if (!success && action.action === "EXECUTE") {
                 consecutiveErrors++;
                 if (consecutiveErrors >= CONSECUTIVE_ERROR_LIMIT) {
@@ -134,11 +191,19 @@ export class ActionExecutor {
         this.file.log("--- Completed Workflow Execution ---", "INFO");
         this.showSummary();
 
-        this.persistWorkflowUpdates(actions);
+        const updatedWorkflowPath = this.persistWorkflowUpdates(actions);
+        let exportedCollectionPath: string | undefined;
 
         if (this.collection) {
-            await this.finalizeExport();
+            exportedCollectionPath = this.finalizeExport();
         }
+
+        return {
+            stats: { ...this.stats },
+            failedLogsDir: this.failedLogsDir,
+            exportedCollectionPath,
+            updatedWorkflowPath,
+        };
     }
 
     private persistWorkflowUpdates(actions: WorkflowAction[]) {
@@ -155,6 +220,8 @@ export class ActionExecutor {
             `Updated workflow register paths saved to: ${relativePath}`,
             "INFO",
         );
+
+        return workflowPath;
     }
 
     private showSummary() {
@@ -225,6 +292,30 @@ export class ActionExecutor {
             "INFO",
     
         );
+
+        return filePath;
+    }
+
+    private defaultPrompt(question: string): Promise<string> {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+
+        return new Promise((resolve) => {
+            rl.question(question, (answer) => {
+                rl.close();
+                resolve(answer.trim());
+            });
+        });
+    }
+
+    private askInput(question: string): Promise<string> {
+        if (this.promptProvider) {
+            return this.promptProvider.prompt(question);
+        }
+
+        return this.defaultPrompt(question);
     }
     
 
@@ -562,81 +653,58 @@ export class ActionExecutor {
         registerKey: string,
         originalPath: string,
     ) {
-        while (true) {
-            const rl = readline.createInterface({
-                input: process.stdin,
-                output: process.stdout,
-            });
+        const rawInputPath = await this.askInput(
+            `\n[INPUT] Enter alternate response path for ${registerKey} (failed: ${originalPath}) or press Enter to skip: `,
+        );
+        const inputPath = String(rawInputPath || "").trim();
 
-            const inputPath = await new Promise<string>((resolve) => {
-                rl.question(
-                    `\n[INPUT] Enter alternate response path for ${registerKey} (failed: ${originalPath}) or press Enter to skip: `,
-                    (answer) => {
-                        rl.close();
-                        resolve(answer.trim());
-                    },
-                );
-            });
-
-            if (!inputPath) {
-                this.console.log(
-                    `Skipped registering ${registerKey} because input was empty.`,
-                    "INPUT",
-                );
-                this.file.log(
-                    `Skipped registering ${registerKey} because input was empty.`,
-                    "INPUT",
-                );
-                return;
-            }
-
-            const overrideValue = getDeepValue(responseData, inputPath);
-            if (overrideValue === undefined) {
-                this.console.log(
-                    `Field not found in response for override path: ${inputPath}`,
-                    "ERROR",
-                );
-                this.file.log(
-                    `Field not found in response for override path: ${inputPath}`,
-                    "ERROR",
-                );
-                continue;
-            }
-
-            this.registers[registerKey] = overrideValue;
-            if (action.register) {
-                action.register[registerKey] = inputPath;
-                this.workflowUpdated = true;
-            }
+        if (!inputPath) {
             this.console.log(
-                `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+                `Skipped registering ${registerKey} because input was empty.`,
                 "INPUT",
             );
             this.file.log(
-                `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+                `Skipped registering ${registerKey} because input was empty.`,
                 "INPUT",
-            );
-            this.file.log(
-                `Updated workflow register path for ${registerKey}: ${originalPath} -> ${inputPath}`,
-                "INFO",
             );
             return;
         }
+
+        const overrideValue = getDeepValue(responseData, inputPath);
+        if (overrideValue === undefined) {
+            this.console.log(
+                `Field not found in response for override path: ${inputPath}`,
+                "ERROR",
+            );
+            this.file.log(
+                `Field not found in response for override path: ${inputPath}`,
+                "ERROR",
+            );
+            return;
+        }
+
+        this.registers[registerKey] = overrideValue;
+        if (action.register) {
+            action.register[registerKey] = inputPath;
+            this.workflowUpdated = true;
+        }
+        this.console.log(
+            `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+            "INPUT",
+        );
+        this.file.log(
+            `Extracted ${registerKey} = ${overrideValue} (override path: ${inputPath})`,
+            "INPUT",
+        );
+        this.file.log(
+            `Updated workflow register path for ${registerKey}: ${originalPath} -> ${inputPath}`,
+            "INFO",
+        );
     }
 
     private async handleInput(action: InputAction) {
         const resolvedLabel = resolveVariables(action.label, this.registers);
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-
-        const input = await new Promise<string>((resolve) => {
-            rl.question(`\n[INPUT] ${resolvedLabel}: `, (answer) => {
-                rl.close();
-                resolve(answer.trim());
-            });
-        });
+        const input = await this.askInput(`\n[INPUT] ${resolvedLabel}: `);
 
         if (!input) {
             this.console.log(
@@ -665,6 +733,12 @@ export class ActionExecutor {
     }
 
     private async handleExecute(action: ExecuteAction): Promise<boolean> {
+        if (this.isStopRequested()) {
+            this.console.log("Skipping EXECUTE because stop was requested.", "ERROR");
+            this.file.log("Skipping EXECUTE because stop was requested.", "ERROR");
+            return false;
+        }
+
         const missingUrlVariables = this.getMissingUrlVariables(action.url);
         if (missingUrlVariables.length > 0) {
             const missingList = missingUrlVariables.join(", ");
@@ -707,8 +781,10 @@ export class ActionExecutor {
         this.console.log(`Executing [${method}] -> ${url}`, "INFO");
         this.file.log(`Executing [${method}] -> ${url}`, "INFO");
 
+        this.console.log(`Headers: ${JSON.stringify(headers)}`, "INFO");
         this.file.log(`Headers: ${JSON.stringify(headers, null, 2)}`, "INFO");
         if (body) {
+            this.console.log(`Body: ${JSON.stringify(body)}`, "INFO");
             this.file.log(`Body: ${JSON.stringify(body, null, 2)}`, "INFO");
         }
 
@@ -725,22 +801,42 @@ export class ActionExecutor {
             await new Promise((resolve) =>
                 setTimeout(resolve, this.config.delay),
             );
+
+            if (this.isStopRequested()) {
+                this.console.log(
+                    "Execution stopped by user request before sending request.",
+                    "ERROR",
+                );
+                this.file.log(
+                    "Execution stopped by user request before sending request.",
+                    "ERROR",
+                );
+                return false;
+            }
         }
 
         try {
             const controller = new AbortController();
+            const onStop = () => controller.abort();
+            this.config.stopSignal?.addEventListener("abort", onStop);
+
             const timeoutId = setTimeout(
                 () => controller.abort(),
                 this.config.timeout,
             );
 
-            const response = await fetch(url, {
-                method,
-                headers: prepared.headers,
-                body: prepared.body,
-                signal: controller.signal,
-            });
-            clearTimeout(timeoutId);
+            let response: Response;
+            try {
+                response = await fetch(url, {
+                    method,
+                    headers: prepared.headers,
+                    body: prepared.body,
+                    signal: controller.signal,
+                });
+            } finally {
+                clearTimeout(timeoutId);
+                this.config.stopSignal?.removeEventListener("abort", onStop);
+            }
 
             const resDataLog = `Response: [${response.status}] ${response.statusText}`;
             this.console.log(resDataLog, response.ok ? "NETWORK" : "FAIL");
@@ -769,6 +865,10 @@ export class ActionExecutor {
 
             this.file.log(
                 `Full Response: ${JSON.stringify(resData, null, 2)}`,
+                "INFO",
+            );
+            this.console.log(
+                `Full Response: ${JSON.stringify(resData)}`,
                 "INFO",
             );
 
@@ -819,7 +919,12 @@ export class ActionExecutor {
             );
             return response.ok;
         } catch (error: any) {
-            const msg = error.name === "AbortError" ? "TIMEOUT" : error.message;
+            const msg =
+                error.name === "AbortError"
+                    ? this.isStopRequested()
+                        ? "STOPPED"
+                        : "TIMEOUT"
+                    : error.message;
             const cause = error.cause
                 ? ` (Cause: ${error.cause.message || error.cause})`
                 : "";

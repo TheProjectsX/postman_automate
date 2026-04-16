@@ -1,0 +1,353 @@
+[
+  {
+    "action": "INPUT",
+    "label": "Enter the base URL for the API (e.g., https://api.example.com)",
+    "register": "baseUrl"
+  },
+  {
+    "action": "LOG",
+    "value": "Initializing user registration data with mock values..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "reg_name": "Automation User",
+      "reg_email": "automation.user.234@example.com",
+      "reg_phone": "+8801712345678",
+      "reg_password": "Pass1234"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Executing user registration..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/register",
+    "item_id": "postman_item_1",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "name": "{{reg_name}}",
+      "email": "{{reg_email}}",
+      "phone": "{{reg_phone}}",
+      "password": "{{reg_password}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "LOG",
+    "value": "User registered successfully. Sending OTP for account verification to {{reg_email}}..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/send-otp",
+    "item_id": "postman_item_3",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "INPUT",
+    "label": "Enter the OTP received for {{reg_email}}",
+    "register": "otp_code"
+  },
+  {
+    "action": "LOG",
+    "value": "Verifying OTP for account activation..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/verify-otp",
+    "item_id": "postman_item_5",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "otp": "{{otp_code}}",
+      "email": "{{reg_email}}"
+    },
+    "register": {
+      "access_token": "data.accessToken",
+      "refresh_token": "data.refreshToken"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "OTP verified. User account is active. Logging in to obtain fresh tokens for subsequent requests..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/login",
+    "item_id": "postman_item_2",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}",
+      "password": "{{reg_password}}"
+    },
+    "register": {
+      "current_access_token": "data.accessToken",
+      "current_refresh_token": "data.refreshToken"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "User logged in successfully. Access and refresh tokens are now registered."
+  },
+  {
+    "action": "LOG",
+    "value": "Initiating change password flow. Registering a new password value..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "new_password": "NewPass5678"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/change-password",
+    "item_id": "postman_item_7",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {{current_access_token}}"
+    },
+    "body": {
+      "oldPassword": "{{reg_password}}",
+      "newPassword": "{{new_password}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "LOG",
+    "value": "Password changed successfully. Updating registered password for future logins and re-logging in..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "reg_password": "{{new_password}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/login",
+    "item_id": "postman_item_2",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}",
+      "password": "{{reg_password}}"
+    },
+    "register": {
+      "current_access_token": "data.accessToken",
+      "current_refresh_token": "data.refreshToken"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Logged in with the new password successfully."
+  },
+  {
+    "action": "LOG",
+    "value": "Initiating forgot password flow for {{reg_email}}..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/forgot-password",
+    "item_id": "postman_item_8",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "LOG",
+    "value": "Forgot password request sent. An OTP should have been sent to {{reg_email}}. Attempting to resend for demonstration..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/send-otp/password-reset",
+    "item_id": "postman_item_4",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "INPUT",
+    "label": "Enter the password reset OTP received for {{reg_email}}",
+    "register": "reset_otp_code"
+  },
+  {
+    "action": "LOG",
+    "value": "Verifying forgot password OTP..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/verify-otp/password-reset",
+    "item_id": "postman_item_6",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "otp": "{{reset_otp_code}}",
+      "email": "{{reg_email}}"
+    },
+    "register": {
+      "reset_password_token": "data.id"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Forgot password OTP verified. Registering a newer password for reset..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "newer_password": "NewerPass9012"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/reset-password",
+    "item_id": "postman_item_9",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "token": "{{reset_password_token}}",
+      "password": "{{newer_password}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "LOG",
+    "value": "Password reset successfully. Updating registered password and re-logging in..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "reg_password": "{{newer_password}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/login",
+    "item_id": "postman_item_2",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{reg_email}}",
+      "password": "{{reg_password}}"
+    },
+    "register": {
+      "current_access_token": "data.accessToken",
+      "current_refresh_token": "data.refreshToken"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Logged in with the reset password successfully."
+  },
+  {
+    "action": "LOG",
+    "value": "Attempting to refresh access token using the current refresh token..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/refresh-token",
+    "item_id": "postman_item_10",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "refreshToken": "{{current_refresh_token}}"
+    },
+    "register": {
+      "current_access_token": "data.accessToken",
+      "current_refresh_token": "data.refreshToken"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Access token refreshed successfully."
+  },
+  {
+    "action": "LOG",
+    "value": "Getting user profile with the current access token..."
+  },
+  {
+    "action": "EXECUTE",
+    "method": "GET",
+    "url": "{{baseUrl}}/profile",
+    "item_id": "postman_item_11",
+    "headers": {
+      "Authorization": "Bearer {{current_access_token}}"
+    },
+    "body": {},
+    "register": {
+      "user_id": "data.id"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "User profile retrieved. User ID: {{user_id}}. Preparing to update profile with mock data..."
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "profile_name": "Updated Automation User",
+      "profile_phone": "+8801987654321",
+      "profile_description": "This is an updated description for the automation test user's profile.",
+      "profile_avatar": "https://example.com/avatars/updated_auto_user.png"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "PATCH",
+    "url": "{{baseUrl}}/profile",
+    "item_id": "postman_item_12",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {{current_access_token}}"
+    },
+    "body": {
+      "name": "{{profile_name}}",
+      "phone": "{{profile_phone}}",
+      "description": "{{profile_description}}",
+      "avatar": "{{profile_avatar}}"
+    },
+    "register": {}
+  },
+  {
+    "action": "LOG",
+    "value": "User profile updated successfully."
+  }
+]

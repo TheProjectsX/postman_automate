@@ -1,0 +1,197 @@
+[
+  {
+    "action": "INPUT",
+    "label": "Enter Base URL",
+    "register": "baseUrl"
+  },
+  {
+    "action": "REGISTER",
+    "registers": {
+      "user_name": "John Doe",
+      "user_email": "john.doe2@example.com",
+      "user_phone": "+8801712345678",
+      "user_password": "Password123!",
+      "new_password": "NewPassword456!"
+    }
+  },
+  {
+    "action": "LOG",
+    "value": "Starting Registration Flow"
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/register",
+    "item_id": "postman_item_1",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "name": "{{user_name}}",
+      "email": "{{user_email}}",
+      "phone": "{{user_phone}}",
+      "password": "{{user_password}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/send-otp",
+    "item_id": "postman_item_3",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{user_email}}"
+    }
+  },
+  {
+    "action": "INPUT",
+    "label": "Enter Registration OTP",
+    "register": "reg_otp"
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/verify-otp",
+    "item_id": "postman_item_5",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "otp": "{{reg_otp}}",
+      "email": "{{user_email}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/login",
+    "item_id": "postman_item_2",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{user_email}}",
+      "password": "{{user_password}}"
+    },
+    "register": {
+      "accessToken": "data.accessToken",
+      "refreshToken": "data.refreshToken"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/change-password",
+    "item_id": "postman_item_7",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "body": {
+      "oldPassword": "{{user_password}}",
+      "newPassword": "{{new_password}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/send-otp/password-reset",
+    "item_id": "postman_item_4",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{user_email}}"
+    }
+  },
+  {
+    "action": "INPUT",
+    "label": "Enter Password Reset OTP",
+    "register": "fp_otp"
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/verify-otp/password-reset",
+    "item_id": "postman_item_6",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "otp": "{{fp_otp}}",
+      "email": "{{user_email}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/forgot-password",
+    "item_id": "postman_item_8",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "email": "{{user_email}}"
+    }
+  },
+  {
+    "action": "INPUT",
+    "label": "Enter Password Reset Token",
+    "register": "reset_token"
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/reset-password",
+    "item_id": "postman_item_9",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "token": "{{reset_token}}",
+      "password": "{{new_password}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "POST",
+    "url": "{{baseUrl}}/auth/refresh-token",
+    "item_id": "postman_item_10",
+    "headers": {
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "refreshToken": "{{refreshToken}}"
+    },
+    "register": {
+      "accessToken": "data.accessToken"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "GET",
+    "url": "{{baseUrl}}/profile",
+    "item_id": "postman_item_11",
+    "headers": {
+      "Authorization": "Bearer {{accessToken}}"
+    }
+  },
+  {
+    "action": "EXECUTE",
+    "method": "PATCH",
+    "url": "{{baseUrl}}/profile",
+    "item_id": "postman_item_12",
+    "headers": {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer {{accessToken}}"
+    },
+    "body": {
+      "name": "Updated John",
+      "phone": "+8801712345679",
+      "description": "Updated profile description",
+      "avatar": "https://example.com/avatar.jpg"
+    }
+  }
+]
