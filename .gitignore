@@ -5,3 +5,4 @@ workflows
 postman-collection.json
 .env
 postman_docs
+.gui_uploads

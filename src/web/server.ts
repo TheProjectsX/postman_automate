@@ -495,6 +495,40 @@ const server = http.createServer(async (req, res) => {
             return;
         }
 
+        if (method === "POST" && pathname === "/api/download") {
+            const body = await readJsonBody(req);
+            const filePath = String(body?.filePath || "").trim();
+
+            if (!filePath) {
+                sendJson(res, 400, { error: "filePath is required." });
+                return;
+            }
+
+            const absolutePath = path.isAbsolute(filePath)
+                ? filePath
+                : path.join(process.cwd(), filePath);
+
+            if (!fs.existsSync(absolutePath)) {
+                sendJson(res, 404, { error: "File not found." });
+                return;
+            }
+
+            if (!absolutePath.endsWith(".json")) {
+                sendJson(res, 400, { error: "Only JSON files can be downloaded." });
+                return;
+            }
+
+            const fileName = path.basename(absolutePath);
+            res.statusCode = 200;
+            res.setHeader("Content-Type", "application/json; charset=utf-8");
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${fileName}"`
+            );
+            fs.createReadStream(absolutePath).pipe(res);
+            return;
+        }
+
         if (method === "GET" && (pathname === "/" || pathname === "/index.html")) {
             sendFile(res, path.join(webRoot, "index.html"));
             return;

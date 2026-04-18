@@ -89,15 +89,33 @@
       </div>
 
       <aside class="side-column stack-in">
-        <section class="panel route-panel stack-in">
+        <section class="panel process-panel stack-in timeline-panel">
           <div class="status-line">
-            <h2>Route Timeline</h2>
-            <span id="routeCount" class="meta">0 routes</span>
+            <div class="timeline-controls">
+              <h2>Process Timeline</h2>
+              <span id="processCount" class="meta">0 steps</span>
+            </div>
+            <button type="button" id="processToggleBtn" class="secondary small-btn">Collapse</button>
           </div>
-          <div id="routeTimeline" class="route-timeline"></div>
+          <div id="processContent" class="timeline-content open">
+            <div id="processTimeline" class="process-timeline"></div>
+          </div>
         </section>
 
-        <section class="panel logs-panel stack-in">
+        <section class="panel route-panel stack-in timeline-panel">
+          <div class="status-line">
+            <div class="timeline-controls">
+              <h2>Route Timeline</h2>
+              <span id="routeCount" class="meta">0 routes</span>
+            </div>
+            <button type="button" id="routeToggleBtn" class="secondary small-btn">Collapse</button>
+          </div>
+          <div id="routeContent" class="timeline-content open">
+            <div id="routeTimeline" class="route-timeline"></div>
+          </div>
+        </section>
+
+        <section class="panel logs-panel stack-in timeline-panel">
           <div class="status-line">
             <div class="logs-controls">
               <h2>Live Logs</h2>

@@ -11,6 +11,12 @@ const logsContent = document.querySelector("#logsContent");
 const resultBox = document.querySelector("#resultBox");
 const routeCount = document.querySelector("#routeCount");
 const routeTimeline = document.querySelector("#routeTimeline");
+const routeToggleBtn = document.querySelector("#routeToggleBtn");
+const routeContent = document.querySelector("#routeContent");
+const processCount = document.querySelector("#processCount");
+const processTimeline = document.querySelector("#processTimeline");
+const processToggleBtn = document.querySelector("#processToggleBtn");
+const processContent = document.querySelector("#processContent");
 const collectionFileInput = document.querySelector("#collectionFile");
 const workflowFileInput = document.querySelector("#workflowFile");
 
@@ -29,6 +35,9 @@ let lastRouteCursor = "";
 let latestLogs = [];
 let activeRouteId = null;
 let logsCollapsed = false;
+let routeTimelineCollapsed = false;
+let processTimelineCollapsed = false;
+let lastExportedCollectionPath = null;
 
 const safe = (value) => (value === undefined || value === null ? "" : String(value));
 
@@ -106,6 +115,29 @@ const api = {
     if (!res.ok) throw new Error(data.error || "Failed to stop run.");
     return data;
   },
+
+  async downloadCollection(filePath) {
+    const res = await fetch("/api/download", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ filePath }),
+    });
+
+    if (!res.ok) {
+      const data = await res.json();
+      throw new Error(data.error || "Failed to download collection.");
+    }
+
+    const blob = await res.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filePath.split("/").pop() || "collection.json";
+    document.body.appendChild(a);
+    a.click();
+    window.URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+  },
 };
 
 const escapeHtml = (input) => {
@@ -161,6 +193,9 @@ const renderResult = (state) => {
   const endedAt = formatRunTimestamp(state.endedAt);
   const duration = formatDuration(state.startedAt, state.endedAt);
 
+  // Reset download tracking
+  lastExportedCollectionPath = null;
+
   if (state.lastError) {
     resultBox.innerHTML = `
       <div class="status-stats-grid">
@@ -208,13 +243,25 @@ const renderResult = (state) => {
     ["Failed logs", r.failedLogsDir],
   ]
     .filter(([, value]) => Boolean(value))
-    .map(
-      ([label, value]) => `
+    .map(([label, value]) => {
+      // Add download button for exported collection
+      if (label === "Exported collection" && value) {
+        lastExportedCollectionPath = value;
+        return `
+        <div class="status-row status-row-with-action">
+          <div class="status-row-content">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(String(value))}</strong>
+          </div>
+          <button type="button" class="download-btn" data-file-path="${escapeHtml(String(value))}">Download</button>
+        </div>`;
+      }
+      return `
       <div class="status-row">
         <span>${escapeHtml(label)}</span>
         <strong>${escapeHtml(String(value))}</strong>
-      </div>`,
-    )
+      </div>`;
+    })
     .join("");
 
   resultBox.innerHTML = `
@@ -234,6 +281,25 @@ const renderResult = (state) => {
       ${pathRows}
     </div>
   `;
+
+  // Attach click event to download button if it exists
+  const downloadBtn = resultBox.querySelector(".download-btn");
+  if (downloadBtn) {
+    downloadBtn.addEventListener("click", async (event) => {
+      event.preventDefault();
+      const filePath = downloadBtn.getAttribute("data-file-path");
+      if (!filePath) {
+        alert("No collection path available.");
+        return;
+      }
+
+      try {
+        await api.downloadCollection(filePath);
+      } catch (error) {
+        alert(String(error.message || error));
+      }
+    });
+  }
 };
 
 const renderLogs = (logs) => {
@@ -384,6 +450,90 @@ const buildRouteTimeline = (logs) => {
   return entries;
 };
 
+const processKeywords = [
+  { keyword: "collection loaded", label: "Collection Loaded" },
+  { keyword: "collection parsed", label: "Collection Parsed" },
+  { keyword: "workflow generated", label: "Workflow Generated" },
+  { keyword: "workflow loaded", label: "Workflow Loaded" },
+  { keyword: "ai process", label: "AI Processing" },
+  { keyword: "routes execution", label: "Routes Execution" },
+  { keyword: "routes executed", label: "Routes Executed" },
+  { keyword: "collection exported", label: "Collection Exported" },
+  { keyword: "processing complete", label: "Processing Complete" },
+  { keyword: "execution complete", label: "Execution Complete" },
+  { keyword: "migration generated", label: "Migration Generated" },
+  { keyword: "started", label: "Started" },
+  { keyword: "completed", label: "Completed" },
+];
+
+const buildProcessTimeline = (logs) => {
+  const entries = [];
+  const processedMessages = new Set();
+
+  for (const log of logs) {
+    const msg = String(log.message || "").toLowerCase();
+    
+    for (const { keyword, label } of processKeywords) {
+      if (msg.includes(keyword) && !processedMessages.has(`${log.id}:${keyword}`)) {
+        processedMessages.add(`${log.id}:${keyword}`);
+        
+        let icon = "⚙️";
+        if (msg.includes("complete") || msg.includes("executed")) {
+          icon = "✓";
+        } else if (msg.includes("started")) {
+          icon = "▶";
+        } else if (msg.includes("loaded") || msg.includes("parsed")) {
+          icon = "📦";
+        } else if (msg.includes("exported")) {
+          icon = "💾";
+        } else if (msg.includes("ai")) {
+          icon = "🤖";
+        }
+
+        entries.push({
+          id: `${log.id}`,
+          timestamp: log.timestamp,
+          label,
+          icon,
+          message: log.message,
+          level: log.level,
+        });
+        break;
+      }
+    }
+  }
+
+  return entries;
+};
+
+const renderProcessTimeline = (logs) => {
+  const cursor = logs.length
+    ? `${logs.length}:${logs[logs.length - 1].id}:${logs[logs.length - 1].timestamp}`
+    : "0";
+
+  const processes = buildProcessTimeline(logs);
+  processCount.textContent = `${processes.length} steps`;
+
+  if (!processes.length) {
+    processTimeline.innerHTML = '<p class="timeline-empty">No process events yet.</p>';
+    return;
+  }
+
+  processTimeline.innerHTML = processes
+    .map((process) => {
+      return `
+        <div class="process-step">
+          <div class="process-icon">${process.icon}</div>
+          <div class="process-info">
+            <div class="process-label">${escapeHtml(process.label)}</div>
+            <div class="process-time">${escapeHtml(process.timestamp)}</div>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+};
+
 const renderRouteTimeline = (logs) => {
   const cursor = logs.length
     ? `${logs.length}:${logs[logs.length - 1].id}:${logs[logs.length - 1].timestamp}`
@@ -469,6 +619,39 @@ const renderLogsCollapseState = () => {
   logsToggleBtn.textContent = logsCollapsed ? "Expand" : "Collapse";
 };
 
+const renderTimelineCollapseState = (contentElement, toggleButton, isCollapsed, type) => {
+  if (!contentElement || !toggleButton) return;
+
+  const panelElement = contentElement.closest(".panel");
+  if (panelElement) {
+    panelElement.classList.toggle("collapsed-panel", isCollapsed);
+  }
+
+  if (type === "logs") {
+    if (logsContent) {
+      logsContent.dataset.collapsed = isCollapsed ? "true" : "false";
+    }
+  } else {
+    contentElement.dataset.collapsed = isCollapsed ? "true" : "false";
+  }
+
+  if (isCollapsed) {
+    contentElement.style.maxHeight = `${contentElement.scrollHeight}px`;
+    window.requestAnimationFrame(() => {
+      contentElement.classList.remove("open");
+      contentElement.style.maxHeight = "0px";
+    });
+  } else {
+    contentElement.classList.add("open");
+    contentElement.style.maxHeight = "0px";
+    window.requestAnimationFrame(() => {
+      contentElement.style.maxHeight = `${contentElement.scrollHeight}px`;
+    });
+  }
+
+  toggleButton.textContent = isCollapsed ? "Expand" : "Collapse";
+};
+
 const closePromptDialog = () => {
   if (promptDialog.open) {
     promptDialog.close();
@@ -541,6 +724,7 @@ const renderState = (state) => {
 
   renderResult(state);
   renderLogs(latestLogs);
+  renderProcessTimeline(latestLogs);
   renderRouteTimeline(latestLogs);
   openPromptDialog(state.pendingPrompt);
 };
@@ -613,6 +797,20 @@ if (logsToggleBtn) {
   logsToggleBtn.addEventListener("click", () => {
     logsCollapsed = !logsCollapsed;
     renderLogsCollapseState();
+  });
+}
+
+if (processToggleBtn) {
+  processToggleBtn.addEventListener("click", () => {
+    processTimelineCollapsed = !processTimelineCollapsed;
+    renderTimelineCollapseState(processContent, processToggleBtn, processTimelineCollapsed, "process");
+  });
+}
+
+if (routeToggleBtn) {
+  routeToggleBtn.addEventListener("click", () => {
+    routeTimelineCollapsed = !routeTimelineCollapsed;
+    renderTimelineCollapseState(routeContent, routeToggleBtn, routeTimelineCollapsed, "route");
   });
 }
 
