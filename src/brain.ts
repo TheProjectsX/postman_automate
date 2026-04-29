@@ -9,7 +9,10 @@ dotenv.config({ quiet: true });
 // Resolve PROMPT.md relative to this file, not the cwd — safe regardless of
 // where the process is started from.
 const __dirname = path.dirname(url.fileURLToPath(import.meta.url));
-const PROMPT = fs.readFileSync(path.join(__dirname, "..", "PROMPT.md"), "utf-8");
+const PROMPT = fs.readFileSync(
+    path.join(__dirname, "..", "PROMPT.md"),
+    "utf-8",
+);
 
 const APIKey = process.env.GEMINI_API_KEY;
 if (!APIKey) {
@@ -231,15 +234,16 @@ export const processPostmanAI = async (
     onModelLog?: (message: string, level: "INFO" | "ERROR") => void,
 ): Promise<WorkflowAction[]> => {
     const contextBlock = context?.trim()
-        ? `\n-------------------------------------\nADDITIONAL CONTEXT / INSTRUCTIONS\n-------------------------------------\n${context.trim()}\n`
+        ? `\n## Additional Context / Instructions:\n${context.trim()}\n`
         : "";
 
-    const prompt = `${PROMPT}${contextBlock}
-Initial Variables:
+    const prompt = `Initial Variables:
 ${JSON.stringify(variables, null, 2)}
 
 Postman Simplified Requests:
 ${JSON.stringify(requests, null, 2)}`;
+
+    const instructions = `${PROMPT}${contextBlock}`;
 
     const models = getCandidateModels();
     let lastError: any;
@@ -262,6 +266,7 @@ ${JSON.stringify(requests, null, 2)}`;
         const model = genAI.getGenerativeModel({
             model: modelName,
             generationConfig: { responseMimeType: "application/json" },
+            systemInstruction: instructions,
         });
 
         try {
