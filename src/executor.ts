@@ -582,10 +582,16 @@ export class ActionExecutor {
     }
 
     private prepareRequestPayload(
+        method: string,
         headers: Record<string, string>,
         body: any,
     ): { headers: Record<string, string>; body?: BodyInit } {
         const preparedHeaders = { ...headers };
+        const normalizedMethod = String(method || "GET").toUpperCase();
+
+        if (normalizedMethod === "GET" || normalizedMethod === "HEAD") {
+            return { headers: preparedHeaders, body: undefined };
+        }
 
         if (body === undefined || body === null) {
             return { headers: preparedHeaders, body: undefined };
@@ -638,6 +644,53 @@ export class ActionExecutor {
         }
 
         return { headers: preparedHeaders, body: String(body) };
+    }
+
+    private getRequestBodyForLogsAndExports(method: string, body: any) {
+        const normalizedMethod = String(method || "GET").toUpperCase();
+        if (normalizedMethod === "GET" || normalizedMethod === "HEAD") {
+            return undefined;
+        }
+        return body;
+    }
+
+    private describeExecutionError(error: any) {
+        if (!error) return "Unknown error";
+
+        const parts: string[] = [];
+        const name = error.name || error.constructor?.name;
+        const message = error.message || String(error);
+
+        if (name && message && message !== name) {
+            parts.push(`${name}: ${message}`);
+        } else if (message) {
+            parts.push(message);
+        }
+
+        const cause = error.cause;
+        if (
+            cause &&
+            cause.name === "AggregateError" &&
+            Array.isArray(cause.errors)
+        ) {
+            const causeLines = cause.errors
+                .map((entry: any) => {
+                    const entryName = entry?.name || entry?.constructor?.name || "Error";
+                    const entryMessage = entry?.message || String(entry);
+                    return `${entryName}: ${entryMessage}`;
+                })
+                .filter(Boolean);
+
+            if (causeLines.length) {
+                parts.push(`Causes: ${causeLines.join(" | ")}`);
+            }
+        } else if (cause) {
+            const causeName = cause.name || cause.constructor?.name || "Error";
+            const causeMessage = cause.message || String(cause);
+            parts.push(`Cause: ${causeName}: ${causeMessage}`);
+        }
+
+        return parts.filter(Boolean).join(" | ") || "Unknown error";
     }
 
     private getMissingUrlVariables(url: string) {
@@ -756,6 +809,7 @@ export class ActionExecutor {
 
         const resolvedAction = this.resolveExecuteAction(action);
         const { url, method, headers, body } = resolvedAction;
+        const effectiveBody = this.getRequestBodyForLogsAndExports(method, body);
 
         const skipPatterns = this.config.skip || [];
         const onlyPatterns = this.config.only || [];
@@ -783,12 +837,12 @@ export class ActionExecutor {
 
         this.console.log(`Headers: ${JSON.stringify(headers)}`, "INFO");
         this.file.log(`Headers: ${JSON.stringify(headers, null, 2)}`, "INFO");
-        if (body) {
-            this.console.log(`Body: ${JSON.stringify(body)}`, "INFO");
-            this.file.log(`Body: ${JSON.stringify(body, null, 2)}`, "INFO");
+        if (effectiveBody !== undefined) {
+            this.console.log(`Body: ${JSON.stringify(effectiveBody)}`, "INFO");
+            this.file.log(`Body: ${JSON.stringify(effectiveBody, null, 2)}`, "INFO");
         }
 
-        const prepared = this.prepareRequestPayload(headers, body);
+        const prepared = this.prepareRequestPayload(method, headers, effectiveBody);
 
         if (this.config.dry) {
             this.console.log("Dry run: request not sent", "INFO");
@@ -848,7 +902,7 @@ export class ActionExecutor {
                 this.stats.success++;
             } else {
                 this.stats.failed++;
-                this.logFailure(url, method, prepared.headers, body, {
+                this.logFailure(url, method, prepared.headers, effectiveBody, {
                     status: response.status,
                     statusText: response.statusText,
                     headers: Object.fromEntries(response.headers.entries()),
@@ -905,7 +959,10 @@ export class ActionExecutor {
                 // Save original workflow headers (before variable resolution)
                 // so exported examples preserve placeholders like {{token}}.
                 headers: action.headers || {},
-                body: body ? JSON.stringify(body) : undefined,
+                body:
+                    effectiveBody !== undefined
+                        ? JSON.stringify(effectiveBody)
+                        : undefined,
             }
 
             this.addExampleToItem(
@@ -919,19 +976,17 @@ export class ActionExecutor {
             );
             return response.ok;
         } catch (error: any) {
+            const isAbort = error.name === "AbortError";
             const msg =
-                error.name === "AbortError"
+                isAbort
                     ? this.isStopRequested()
                         ? "STOPPED"
                         : "TIMEOUT"
-                    : error.message;
-            const cause = error.cause
-                ? ` (Cause: ${error.cause.message || error.cause})`
-                : "";
-            this.console.log(`Execution Failed: ${msg}${cause}`, "ERROR");
-            this.file.log(`Execution Failed: ${msg}${cause}`, "ERROR");
+                    : this.describeExecutionError(error);
+            this.console.log(`Execution Failed: ${msg}`, "ERROR");
+            this.file.log(`Execution Failed: ${msg}`, "ERROR");
             this.stats.errors++;
-            this.logFailure(url, method, prepared.headers, body, null, msg + cause);
+            this.logFailure(url, method, prepared.headers, effectiveBody, null, msg);
             return false;
         }
     }

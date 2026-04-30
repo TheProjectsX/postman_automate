@@ -1,153 +1,235 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Postman Automator GUI</title>
-  <link rel="stylesheet" href="/styles.css" />
-</head>
-<body>
-  <main class="shell">
-    <div class="dashboard">
-      <div class="main-column stack-in">
-        <header class="hero panel">
-          <div>
-            <p class="kicker">Postman Automation Studio</p>
-            <h1>Execution Console</h1>
-          </div>
-          <p class="subtitle">A pro control surface for running workflows with the same shared core used by CLI.</p>
-        </header>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width,initial-scale=1" />
+        <title>Postman Automate — GUI</title>
+        <link rel="stylesheet" href="/styles.css" />
+    </head>
+    <body>
+        <div id="app" class="container">
+            <aside class="panel controls">
+                <header class="tool-header">
+                    <h1>Postman Automate</h1>
+                    <p class="muted">Developer GUI</p>
+                </header>
 
-        <section class="panel form-panel stack-in">
-          <div class="section-head">
-            <h2>Run Setup</h2>
-            <p>Select collection and optional workflow file, then run.</p>
-          </div>
+                <section class="card file-section">
+                    <div class="file-inputs-row">
+                        <div
+                            class="file-upload-zone"
+                            id="collectionZone"
+                            data-for="collectionFile"
+                        >
+                            <label for="collectionFile" class="file-label">
+                                <div class="file-icon">📄</div>
+                                <div class="file-text">
+                                    <div class="file-required">
+                                        Collection File *
+                                    </div>
+                                    <div class="file-hint">Drag or click</div>
+                                </div>
+                            </label>
+                            <input
+                                id="collectionFile"
+                                type="file"
+                                accept=".json"
+                            />
+                        </div>
+                        <div
+                            class="file-upload-zone"
+                            id="workflowZone"
+                            data-for="workflowFile"
+                        >
+                            <label for="workflowFile" class="file-label">
+                                <div class="file-icon">📋</div>
+                                <div class="file-text">
+                                    <div>Workflow File (optional)</div>
+                                    <div class="file-hint">Drag or click</div>
+                                </div>
+                            </label>
+                            <input
+                                id="workflowFile"
+                                type="file"
+                                accept=".json"
+                            />
+                        </div>
+                    </div>
+                    <div id="uploadedFiles" class="uploaded-files"></div>
+                </section>
 
-          <form id="runForm" class="grid">
-            <label>
-              Collection File (required)
-              <input id="collectionFile" name="collectionFile" type="file" accept=".json,application/json" required />
-            </label>
+                <details class="card" id="additionalSettings">
+                    <summary>⚙ Additional Settings</summary>
+                    <div class="collapse-grid">
+                        <div class="settings-grid">
+                            <label class="field"
+                                >Delay (ms)
+                                <input
+                                    id="delay"
+                                    type="number"
+                                    placeholder="1000"
+                                />
+                            </label>
+                            <label class="field"
+                                >Timeout (ms)
+                                <input
+                                    id="timeout"
+                                    type="number"
+                                    placeholder="30000"
+                                />
+                            </label>
+                            <label class="field"
+                                >Skip Patterns (comma)
+                                <input
+                                    id="skip"
+                                    type="text"
+                                    placeholder="path1,path2"
+                                />
+                            </label>
+                            <label class="field"
+                                >Only Patterns (comma)
+                                <input
+                                    id="only"
+                                    type="text"
+                                    placeholder="pathA,pathB"
+                                />
+                            </label>
+                            <label class="field full"
+                                >Context / Extra AI Instructions
+                                <textarea
+                                    id="context"
+                                    rows="3"
+                                    placeholder="Helpful context for AI..."
+                                ></textarea>
+                            </label>
+                            <label class="checkbox">
+                                <input id="dry" type="checkbox" /> Dry Run
+                            </label>
+                        </div>
+                    </div>
+                </details>
 
-            <label>
-              Workflow File (optional)
-              <input id="workflowFile" name="workflowFile" type="file" accept=".json,application/json" />
-            </label>
+                <div class="actions card">
+                    <button id="startBtn" class="primary">Start</button>
+                    <button id="stopBtn">Stop</button>
+                    <button id="resetBtn">Reset</button>
+                </div>
 
-            <details class="wide settings-box" id="additionalSettings">
-              <summary>Additional Settings</summary>
-              <div class="settings-grid">
-                <label>
-                  Delay (ms)
-                  <input id="delay" name="delay" type="number" min="0" placeholder="0" />
-                </label>
+                <section class="card status" id="runStatus">
+                    <div class="status-row">
+                        <div>
+                            <strong>Status:</strong>
+                            <span id="statusText" class="status-badge"
+                                >idle</span
+                            >
+                        </div>
+                        <div>
+                            <strong>Duration:</strong>
+                            <span id="duration">—</span>
+                        </div>
+                    </div>
+                    <div class="status-row">
+                        <div>
+                            <strong>Started:</strong>
+                            <span id="startedAt" class="time-text">—</span>
+                        </div>
+                        <div>
+                            <strong>Ended:</strong>
+                            <span id="endedAt" class="time-text">—</span>
+                        </div>
+                    </div>
 
-                <label>
-                  Timeout (ms)
-                  <input id="timeout" name="timeout" type="number" min="1" placeholder="30000" />
-                </label>
+                    <div class="stats" id="stats">
+                        <div class="stat">
+                            <div class="label">Total</div>
+                            <div id="statTotal">00</div>
+                        </div>
+                        <div class="stat">
+                            <div class="label">Success</div>
+                            <div id="statSuccess">00</div>
+                        </div>
+                        <div class="stat">
+                            <div class="label">Failed</div>
+                            <div id="statFailed">00</div>
+                        </div>
+                        <div class="stat">
+                            <div class="label">Skipped</div>
+                            <div id="statSkipped">00</div>
+                        </div>
+                        <div class="stat">
+                            <div class="label">Errors</div>
+                            <div id="statErrors">00</div>
+                        </div>
+                    </div>
 
-                <label>
-                  Skip Patterns
-                  <input id="skip" name="skip" type="text" placeholder="/admin,/internal" />
-                </label>
+                    <div class="card-actions" id="downloadActions"></div>
+                </section>
+            </aside>
 
-                <label>
-                  Only Patterns
-                  <input id="only" name="only" type="text" placeholder="/auth,/profile" />
-                </label>
+            <main class="panel logs">
+                <div class="top-row">
+                    <h2>Timelines & Logs</h2>
+                </div>
 
-                <label class="wide">
-                  Context / Extra AI Instructions
-                  <textarea id="context" name="context" rows="4" placeholder="Optional context for workflow generation"></textarea>
-                </label>
+                <details class="card timeline" id="processTimelineCard" open>
+                    <summary>Process Timeline</summary>
+                    <div class="collapse-grid">
+                        <div id="processTimeline" class="timeline-list"></div>
+                    </div>
+                </details>
 
-                <label class="toggle">
-                  <input id="dry" name="dry" type="checkbox" />
-                  <span>Dry Run</span>
-                </label>
-              </div>
-            </details>
+                <details class="card timeline" id="routeTimelineCard" open>
+                    <summary>Route Timeline</summary>
+                    <div class="collapse-grid">
+                        <div id="routeTimeline" class="routes-list"></div>
+                    </div>
+                </details>
 
-            <div class="actions wide">
-              <button id="startBtn" type="submit">Start Run</button>
-              <button id="stopBtn" type="button" class="danger">Stop</button>
-              <button id="resetBtn" type="button" class="secondary">Reset</button>
+                <details class="card logs-card" id="liveLogsCard" open>
+                    <summary>Live Logs</summary>
+                    <div class="collapse-grid">
+                        <div id="liveLogs" class="live-logs"></div>
+                    </div>
+                </details>
+            </main>
+        </div>
+
+        <div
+            id="promptPopup"
+            class="prompt hidden"
+            role="dialog"
+            aria-hidden="true"
+        >
+            <div class="prompt-bar">
+                <div class="title">AI Input Required</div>
+                <div class="controls">
+                    <!-- <button id="minimizePrompt" type="button" title="Minimize">_</button> -->
+                    <button id="closePrompt" type="button" title="Close">
+                        ×
+                    </button>
+                </div>
             </div>
-          </form>
-        </section>
-
-        <section class="panel status-panel stack-in">
-          <div class="status-line">
-            <h2>Run Status</h2>
-            <span id="statusBadge" class="badge idle">idle</span>
-          </div>
-          <p id="cwdText" class="meta"></p>
-          <div id="resultBox" class="result-box"></div>
-        </section>
-      </div>
-
-      <aside class="side-column stack-in">
-        <section class="panel process-panel stack-in timeline-panel">
-          <div class="status-line">
-            <div class="timeline-controls">
-              <h2>Process Timeline</h2>
-              <span id="processCount" class="meta">0 steps</span>
+            <div class="prompt-body">
+                <div id="promptQuestion" class="prompt-question"></div>
+                <textarea
+                    id="promptAnswer"
+                    class="prompt-answer"
+                    rows="3"
+                    placeholder="Type your answer..."
+                ></textarea>
+                <div class="prompt-actions">
+                    <button
+                        id="submitPrompt"
+                        type="button"
+                        class="primary"
+                        disabled
+                    >
+                        Submit
+                    </button>
+                </div>
             </div>
-            <button type="button" id="processToggleBtn" class="secondary small-btn">Collapse</button>
-          </div>
-          <div id="processContent" class="timeline-content open">
-            <div id="processTimeline" class="process-timeline"></div>
-          </div>
-        </section>
+        </div>
 
-        <section class="panel route-panel stack-in timeline-panel">
-          <div class="status-line">
-            <div class="timeline-controls">
-              <h2>Route Timeline</h2>
-              <span id="routeCount" class="meta">0 routes</span>
-            </div>
-            <button type="button" id="routeToggleBtn" class="secondary small-btn">Collapse</button>
-          </div>
-          <div id="routeContent" class="timeline-content open">
-            <div id="routeTimeline" class="route-timeline"></div>
-          </div>
-        </section>
-
-        <section class="panel logs-panel stack-in timeline-panel">
-          <div class="status-line">
-            <div class="logs-controls">
-              <h2>Live Logs</h2>
-              <span id="logCount" class="meta">0 lines</span>
-            </div>
-            <button type="button" id="logsToggleBtn" class="secondary small-btn">Collapse</button>
-          </div>
-          <div id="logsContent" class="logs-content open">
-            <pre id="logs" class="logs"></pre>
-          </div>
-        </section>
-      </aside>
-    </div>
-  </main>
-
-  <dialog id="promptDialog" class="prompt-dialog">
-    <form method="dialog" id="promptForm">
-      <div class="prompt-header">
-        <h3>Input Required</h3>
-        <button type="button" id="promptToggleBtn" class="prompt-toggle">Minimize</button>
-      </div>
-      <div class="prompt-body">
-        <p id="promptQuestion"></p>
-        <input id="promptValue" type="text" placeholder="Type value and submit" />
-        <menu>
-          <button type="button" id="promptNoInputBtn" class="secondary">No Input</button>
-          <button type="submit">Submit</button>
-        </menu>
-      </div>
-    </form>
-  </dialog>
-
-  <script src="/app.js" type="module"></script>
-</body>
+        <script src="/app.js"></script>
+    </body>
 </html>
